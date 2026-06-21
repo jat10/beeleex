@@ -9,12 +9,19 @@ import Config
 config :beeleex, BeeleexWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
-  http: [ip: {127, 0, 0, 1}, port: 4000],
+  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4000")],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "tcY+0fE5HToySR8E7WuMBAW+3QeRCdI8S6bXh3ignoiz+UlsnXGZUVG1wXzd3ZId",
-  watchers: []
+  watchers: [
+    esbuild: {Esbuild, :install_and_run, [:beeleex, ~w(--sourcemap=inline --watch)]}
+  ]
+
+# Demo data so the billing pages render without a real Beelee Business Unit.
+# Remove this line (and set :business_unit_secure_key / :business_unit_id /
+# :beelee_endpoint) to develop against a real Beelee BU.
+config :beeleex, :api_module, BeeleexWeb.Dev.SampleApi
 
 # ## SSL Support
 #

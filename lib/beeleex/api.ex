@@ -3,6 +3,8 @@ defmodule Beeleex.Api do
   This is in charge of interfacing with the Beelee GraphQL server
   To update data like Business Units, the Billing Center, companies or generate/update invoices
   """
+  @behaviour Beeleex.ApiBehaviour
+
   require Logger
 
   defp url do
@@ -377,6 +379,7 @@ defmodule Beeleex.Api do
                companyId: company_id,
                maxAmount: max_amount,
                searchTag: search_tag,
+               reason: reason,
                tags: tags
              }
            },
@@ -404,5 +407,568 @@ defmodule Beeleex.Api do
         Logger.error("#{__ENV__.function |> elem(0)}: #{error}")
         {:error, error}
     end
+  end
+
+  # --------------------------------------------------------------------------
+  # Company back-office UI operations
+  #
+  # These functions power the Beeleex LiveView pages. They use the same
+  # server-to-server auth (`secure-key` + `bu-id`) as the rest of this module,
+  # so the BU credentials never reach the browser.
+  #
+  # The selected fields intentionally exclude secrets present in the Beelee
+  # `Company` schema (e.g. `stripeSecretKey`, `secureKey`); only the data the
+  # back-office UI needs is requested.
+  # --------------------------------------------------------------------------
+
+  @doc """
+  List the companies of the Business Unit.
+
+  `opts` accepts:
+    * `:filter` - a list of Beelee `Filter` maps (defaults to `[]`)
+    * `:size` - page size (defaults to `20`)
+    * `:skip` - number of records to skip (defaults to `0`)
+
+  Returns `{:ok, %{companies: [%Beeleex.Company{}], total: integer, count: integer}}`.
+  """
+  @spec get_companies(keyword) ::
+          {:ok, %{companies: list(Beeleex.Company.t()), total: integer, count: integer}}
+          | {:error, String.t()}
+  def get_companies(opts \\ []) do
+    filter = Keyword.get(opts, :filter, [])
+    size = Keyword.get(opts, :size, 20)
+    skip = Keyword.get(opts, :skip, 0)
+
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{
+             query: """
+             query getCompanies($filter:[Filter], $size:Int, $skip:Int) {
+               getCompanies(filter:$filter, size:$size, skip:$skip) {
+                 companies { #{company_fields()} }
+                 total
+                 count
+               }
+             }
+             """,
+             variables: %{filter: filter, size: size, skip: skip}
+           },
+           headers()
+         ) do
+      %{"data" => %{"getCompanies" => %{"companies" => companies} = result}} ->
+        {:ok,
+         %{
+           companies: Enum.map(companies, &parse_company/1),
+           total: result["total"] || 0,
+           count: result["count"] || length(companies)
+         }}
+
+      response ->
+        graphql_error(response, "get_companies")
+    end
+  end
+
+  @doc """
+  Fetch a single company by its Beelee id.
+  """
+  @spec get_company(integer | String.t()) ::
+          {:ok, Beeleex.Company.t()} | {:error, String.t()}
+  def get_company(id) do
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{
+             query: """
+             query getCompany($id:Int!) {
+               getCompany(id:$id) { #{company_fields()} }
+             }
+             """,
+             variables: %{id: id}
+           },
+           headers()
+         ) do
+      %{"data" => %{"getCompany" => company}} when not is_nil(company) ->
+        {:ok, parse_company(company)}
+
+      response ->
+        graphql_error(response, "get_company")
+    end
+  end
+
+  @doc """
+  Create a company. `company_input` must match the Beelee `CompanyInput` shape
+  (camelCase keys, e.g. `%{name:, email:, phoneNumber:, vatNumber:, address: %{...}}`).
+  """
+  @spec create_company(map) :: {:ok, Beeleex.Company.t()} | {:error, String.t()}
+  def create_company(company_input) do
+    mutate_company(
+      """
+      mutation createCompany($company:CompanyInput!) {
+        createCompany(company:$company) { #{company_fields()} }
+      }
+      """,
+      %{company: company_input},
+      "createCompany",
+      "create_company"
+    )
+  end
+
+  @doc """
+  Update the company identified by `id` with the given `CompanyInput` map.
+  """
+  @spec update_company(integer | String.t(), map) ::
+          {:ok, Beeleex.Company.t()} | {:error, String.t()}
+  def update_company(id, company_input) do
+    mutate_company(
+      """
+      mutation editCompany($company:CompanyInput!, $id:Int!) {
+        editCompany(company:$company, id:$id) { #{company_fields()} }
+      }
+      """,
+      %{company: company_input, id: id},
+      "editCompany",
+      "update_company"
+    )
+  end
+
+  @doc """
+  Delete the company identified by `id`. Returns `{:ok, message}`.
+  """
+  @spec delete_company(integer | String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def delete_company(id) do
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{
+             query: """
+             mutation deleteCompany($id:Int!) {
+               deleteCompany(id:$id) { message }
+             }
+             """,
+             variables: %{id: id}
+           },
+           headers()
+         ) do
+      %{"data" => %{"deleteCompany" => %{"message" => message}}} ->
+        {:ok, message}
+
+      response ->
+        graphql_error(response, "delete_company")
+    end
+  end
+
+  @doc """
+  Return the customer projects that are available to link (i.e. not yet linked
+  to any company). `project_ids` is the list of candidate `CustomerProject` ids.
+  """
+  @spec get_unlinked_projects(list(String.t())) :: {:ok, list(String.t())} | {:error, String.t()}
+  def get_unlinked_projects(project_ids) do
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{
+             query: """
+             query getUnlinkedProjects($projectIds: [CustomerProject]) {
+               getUnlinkedProjects(projectIds: $projectIds)
+             }
+             """,
+             variables: %{projectIds: project_ids}
+           },
+           headers()
+         ) do
+      %{"data" => %{"getUnlinkedProjects" => projects}} ->
+        {:ok, projects || []}
+
+      response ->
+        graphql_error(response, "get_unlinked_projects")
+    end
+  end
+
+  @doc """
+  Link one or more customer projects to the company identified by `id`.
+  `project_ids` is a list of `CustomerProject` values.
+  """
+  @spec link_projects(integer | String.t(), list) ::
+          {:ok, Beeleex.Company.t()} | {:error, String.t()}
+  def link_projects(id, project_ids) do
+    mutate_company(
+      """
+      mutation linkCustomerProject($id:Int!, $projectIds: [CustomerProject]) {
+        linkCustomerProject(id:$id, projectIds: $projectIds) { #{company_fields()} }
+      }
+      """,
+      %{id: id, projectIds: project_ids},
+      "linkCustomerProject",
+      "link_projects"
+    )
+  end
+
+  @doc """
+  Unlink a single customer project from the company identified by `id`.
+  """
+  @spec unlink_project(integer | String.t(), any) ::
+          {:ok, Beeleex.Company.t()} | {:error, String.t()}
+  def unlink_project(id, project_id) do
+    mutate_company(
+      """
+      mutation unlinkCustomerProject($id:Int!, $projectId: CustomerProject) {
+        unlinkCustomerProject(id:$id, projectId: $projectId) { #{company_fields()} }
+      }
+      """,
+      %{id: id, projectId: project_id},
+      "unlinkCustomerProject",
+      "unlink_project"
+    )
+  end
+
+  @doc """
+  List invoices. `opts` accepts the same `:filter`, `:size` and `:skip` keys as
+  `get_companies/1`. To scope invoices to a company, pass a `company_id` filter:
+
+      Beeleex.Api.get_invoices(filter: [%{key: "company_id", value: to_string(company_id)}])
+
+  Returns `{:ok, %{invoices: [%Beeleex.Invoice{}], total: integer, count: integer}}`.
+  """
+  @spec get_invoices(keyword) ::
+          {:ok, %{invoices: list(Beeleex.Invoice.t()), total: integer, count: integer}}
+          | {:error, String.t()}
+  def get_invoices(opts \\ []) do
+    filter = Keyword.get(opts, :filter, [])
+    size = Keyword.get(opts, :size, 20)
+    skip = Keyword.get(opts, :skip, 0)
+
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{
+             query: """
+             query getInvoices($filter:[Filter], $size:Int, $skip:Int) {
+               getInvoices(filter:$filter, size:$size, skip:$skip) {
+                 total
+                 count
+                 invoices { #{invoice_fields()} }
+               }
+             }
+             """,
+             variables: %{filter: filter, size: size, skip: skip}
+           },
+           headers()
+         ) do
+      %{"data" => %{"getInvoices" => %{"invoices" => invoices} = result}} ->
+        {:ok,
+         %{
+           invoices: Enum.map(invoices, &parse_invoice/1),
+           total: result["total"] || 0,
+           count: result["count"] || length(invoices)
+         }}
+
+      response ->
+        graphql_error(response, "get_invoices")
+    end
+  end
+
+  @doc """
+  Fetch a single invoice by its Beelee id.
+  """
+  @spec get_invoice(integer | String.t()) :: {:ok, Beeleex.Invoice.t()} | {:error, String.t()}
+  def get_invoice(id) do
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{
+             query: """
+             query getInvoice($id:Int!) {
+               getInvoice(id:$id) { #{invoice_fields()} }
+             }
+             """,
+             variables: %{id: id}
+           },
+           headers()
+         ) do
+      %{"data" => %{"getInvoice" => invoice}} when not is_nil(invoice) ->
+        {:ok, parse_invoice(invoice)}
+
+      response ->
+        graphql_error(response, "get_invoice")
+    end
+  end
+
+  @doc """
+  List a company's payment methods. `opts` accepts `:filter`, `:size`, `:skip`
+  like `get_invoices/1`; scope to a company with a `company_id` filter.
+
+  Returns `{:ok, %{payment_methods: [map], total: integer, count: integer}}`
+  where each payment method is an atomized map (`:id`, `:status`, `:type`,
+  `:default_payment_method`, `:stripe_card` => `%{:brand, :last4, :exp_month,
+  :exp_year}`, ...).
+  """
+  @spec get_payment_methods(keyword) ::
+          {:ok, %{payment_methods: list(map), total: integer, count: integer}}
+          | {:error, String.t()}
+  def get_payment_methods(opts \\ []) do
+    filter = Keyword.get(opts, :filter, [])
+    size = Keyword.get(opts, :size, 20)
+    skip = Keyword.get(opts, :skip, 0)
+
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{
+             query: """
+             query getPaymentMethods($filter:[Filter], $size:Int, $skip:Int) {
+               getPaymentMethods(filter:$filter, size:$size, skip:$skip) {
+                 count
+                 total
+                 paymentMethods {
+                   id
+                   type
+                   status
+                   attempt
+                   defaultPaymentMethod
+                   company { id name }
+                   stripeCard { stripeId brand expMonth expYear last4 }
+                 }
+               }
+             }
+             """,
+             variables: %{filter: filter, size: size, skip: skip}
+           },
+           headers()
+         ) do
+      %{"data" => %{"getPaymentMethods" => %{"paymentMethods" => methods} = result}} ->
+        {:ok,
+         %{
+           payment_methods:
+             Enum.map(methods, fn method ->
+               ExGeeks.Helpers.atomize_keys(method, transformer: &Macro.underscore/1)
+             end),
+           total: result["total"] || 0,
+           count: result["count"] || length(methods)
+         }}
+
+      response ->
+        graphql_error(response, "get_payment_methods")
+    end
+  end
+
+  @doc """
+  Request a Stripe SetupIntent so a new card can be added to the company
+  identified by `company_id`. The returned `client_secret` and `publishable_key`
+  are confirmed client-side with Stripe.js (see the Beeleex Stripe LiveView hook).
+  """
+  @spec request_setup_intent(integer | String.t()) ::
+          {:ok, %{client_secret: String.t(), publishable_key: String.t(), verified: boolean}}
+          | {:error, String.t()}
+  def request_setup_intent(company_id) do
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{
+             query: """
+             mutation requestSetupIntent($id:Int!) {
+               requestSetupIntent(id:$id) {
+                 clientSecret
+                 publishableKey
+                 verified
+               }
+             }
+             """,
+             variables: %{id: company_id}
+           },
+           headers()
+         ) do
+      %{"data" => %{"requestSetupIntent" => intent}} when not is_nil(intent) ->
+        {:ok,
+         %{
+           client_secret: intent["clientSecret"],
+           publishable_key: intent["publishableKey"],
+           verified: intent["verified"]
+         }}
+
+      response ->
+        graphql_error(response, "request_setup_intent")
+    end
+  end
+
+  @doc """
+  Deactivate the payment method identified by `id`. Returns `{:ok, status}`.
+  """
+  @spec deactivate_payment_method(integer | String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def deactivate_payment_method(id) do
+    payment_method_status_mutation(
+      """
+      mutation deactivatePaymentMethod($id:Int!) {
+        deactivatePaymentMethod(id:$id) { status }
+      }
+      """,
+      %{id: id},
+      "deactivatePaymentMethod",
+      "deactivate_payment_method"
+    )
+  end
+
+  @doc """
+  Retry (reactivate) the payment method identified by `id`. Returns `{:ok, status}`.
+  """
+  @spec reactivate_payment_method(integer | String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def reactivate_payment_method(id) do
+    payment_method_status_mutation(
+      """
+      mutation retryPaymentMethod($id:Int!) {
+        retryPaymentMethod(id:$id) { status }
+      }
+      """,
+      %{id: id},
+      "retryPaymentMethod",
+      "reactivate_payment_method"
+    )
+  end
+
+  @doc """
+  Make `payment_id` the default payment method for `company_id`.
+  Returns `{:ok, type}`.
+  """
+  @spec make_default_payment_method(integer | String.t(), integer | String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def make_default_payment_method(company_id, payment_id) do
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{
+             query: """
+             mutation changeDefaultPaymentMethod($companyId:Int!, $paymentId:Int!) {
+               changeDefaultPaymentMethod(companyId:$companyId, paymentMethodId:$paymentId) {
+                 type
+               }
+             }
+             """,
+             variables: %{companyId: company_id, paymentId: payment_id}
+           },
+           headers()
+         ) do
+      %{"data" => %{"changeDefaultPaymentMethod" => %{"type" => type}}} ->
+        {:ok, type}
+
+      response ->
+        graphql_error(response, "make_default_payment_method")
+    end
+  end
+
+  # -- shared helpers for the company UI operations --------------------------
+
+  defp mutate_company(query, variables, data_key, fn_name) do
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{query: query, variables: variables},
+           headers()
+         ) do
+      %{"data" => %{^data_key => company}} when not is_nil(company) ->
+        {:ok, parse_company(company)}
+
+      response ->
+        graphql_error(response, fn_name)
+    end
+  end
+
+  defp parse_company(company) do
+    company
+    |> ExGeeks.Helpers.atomize_keys(transformer: &Macro.underscore/1)
+    |> then(&struct(Beeleex.Company, &1))
+  end
+
+  defp parse_invoice(invoice) do
+    invoice
+    |> ExGeeks.Helpers.atomize_keys(transformer: &Macro.underscore/1)
+    |> then(&struct(Beeleex.Invoice, &1))
+  end
+
+  defp payment_method_status_mutation(query, variables, data_key, fn_name) do
+    case ExGeeks.Helpers.endpoint_post_callback(
+           url(),
+           %{query: query, variables: variables},
+           headers()
+         ) do
+      %{"data" => %{^data_key => %{"status" => status}}} ->
+        {:ok, status}
+
+      response ->
+        graphql_error(response, fn_name)
+    end
+  end
+
+  defp graphql_error(%{"errors" => errors}, fn_name) when is_list(errors) do
+    error = List.first(errors)["message"]
+    Logger.error("#{fn_name}: #{error}")
+    {:error, error}
+  end
+
+  defp graphql_error(_response, fn_name) do
+    Logger.error("#{fn_name}: unexpected response from Beelee")
+    {:error, "unexpected response from Beelee"}
+  end
+
+  # Non-sensitive company fields requested by the back-office UI.
+  defp company_fields do
+    """
+    id
+    name
+    email
+    phoneNumber
+    vatNumber
+    registrationNumber
+    solvencyStatus
+    userId
+    customerProjects
+    invoicesCount
+    paymentMethodsCount
+    address {
+      city
+      country
+      postalCode
+      streetName
+      streetNumber
+    }
+    businessUnit {
+      id
+      name
+      cycle
+    }
+    """
+  end
+
+  # Invoice fields requested by the back-office UI.
+  defp invoice_fields do
+    """
+    id
+    type
+    status
+    attempt
+    cycle
+    beginning
+    end
+    closing_date
+    insertedAt
+    decimalPlaces
+    amountBeforeTax
+    taxAmount
+    taxRate
+    amountWithTax
+    reduction_amount_before_tax
+    reduction_tax_amount
+    reduction_amount_with_tax
+    company {
+      id
+      name
+    }
+    breakdown {
+      packageName
+      packagePriceBeforeTax
+      packageTax
+      projectId
+      projectName
+      payAsYouGo {
+        name
+        description
+        quantity
+        unitPriceBeforeTax
+        totalBeforeTax
+        tax
+      }
+    }
+    """
   end
 end

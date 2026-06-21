@@ -12,7 +12,6 @@ defmodule BeeleexWeb.BeeleexController do
   use BeeleexWeb, :controller
   require Logger
   alias Beeleex.Helpers
-  action_fallback(BeeleexWeb.FallbackController)
 
   @doc """
   Verifies a user token
