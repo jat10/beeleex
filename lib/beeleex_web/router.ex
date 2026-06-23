@@ -38,26 +38,62 @@ defmodule Beeleex.Routes do
   live "/companies/:id/invoices/:invoice_id", InvoicesLive.Show, :show
   ```
 
-  The pages render through the `:beeleex_browser` pipeline (plus any
-  `:pipe_through` pipes you append). They fetch data server-side via
-  `Beeleex.Api`, so configure `:business_unit_secure_key`, `:business_unit_id`
-  and (optionally) `:beelee_endpoint` for your app.
+  The pages fetch data server-side via `Beeleex.Api`, so configure
+  `:business_unit_secure_key`, `:business_unit_id` and (optionally)
+  `:beelee_endpoint` for your app.
+
+  ### Options
+
+  | Option | Applies to | Default |
+  |--------|------------|---------|
+  | `:scope` | all routes | `"/beeleex"` |
+  | `:live` | mount the billing pages | `false` |
+  | `:pipe_through` | the `verify_token` API route | `[]` |
+  | `:live_pipe_through` | the billing pages (after `:beeleex_browser`) — use for auth | `[]` |
+  | `:on_mount` | the billing `live_session` — assign `current_user`, guard, etc. | `[]` |
+  | `:root_layout` | the billing `live_session` | `{BeeleexWeb.Layouts, :root}` |
+  | `:live_session_name` | the `live_session` name | `:beeleex` |
+
+  ### Embedding in your app's chrome (auth + layout)
+
+  To put the pages behind your auth and inside your own dashboard layout:
+
+  ```elixir
+  use Beeleex.Routes,
+    live: true,
+    scope: "/billing",
+    live_pipe_through: [:my_auth],
+    on_mount: [MyAppWeb.AuthHook],
+    root_layout: {MyAppWeb.Layouts, :root}
+  ```
+
+  Then point the pages' inner layout at a function of yours that renders your
+  chrome around the content (wrap it in an element with class `beeleex` so the
+  shipped stylesheet applies):
+
+  ```elixir
+  config :beeleex, :live_layout, {MyAppWeb.Layouts, :beeleex}
+  ```
 
   ### Requirements for the host app
 
   * Your endpoint must serve the LiveView socket:
     `socket "/live", Phoenix.LiveView.Socket, ...`.
-  * Pass `root_layout:` if you want the pages wrapped in your own root layout;
-    it defaults to `{BeeleexWeb.Layouts, :root}`.
+  * Make `priv/static/beeleex/beeleex.css` reachable (e.g.
+    `plug Plug.Static, at: "/", from: :beeleex, only: ~w(beeleex)`).
   """
 
   defmacro __using__(options \\ []) do
     scoped = Keyword.get(options, :scope, "/beeleex")
-    custom_pipes = Keyword.get(options, :pipe_through, [])
-    api_pipes = [:beeleex_api] ++ custom_pipes
-    browser_pipes = [:beeleex_browser] ++ custom_pipes
+    api_pipes = [:beeleex_api] ++ Keyword.get(options, :pipe_through, [])
+    browser_pipes = [:beeleex_browser] ++ Keyword.get(options, :live_pipe_through, [])
     live? = Keyword.get(options, :live, false)
+    live_session_name = Keyword.get(options, :live_session_name, :beeleex)
+    # root_layout / on_mount are kept as AST and unquoted directly so a host can
+    # pass aliased modules (e.g. {MyAppWeb.Layouts, :root}) that resolve in its
+    # own context. Defaults are plain terms, which unquote splices fine too.
     root_layout = Keyword.get(options, :root_layout, {BeeleexWeb.Layouts, :root})
+    on_mount = Keyword.get(options, :on_mount, [])
 
     quote do
       import Phoenix.LiveView.Router
@@ -84,7 +120,9 @@ defmodule Beeleex.Routes do
         scope unquote(scoped), BeeleexWeb do
           pipe_through(unquote(browser_pipes))
 
-          live_session :beeleex, root_layout: unquote(Macro.escape(root_layout)) do
+          live_session unquote(live_session_name),
+            root_layout: unquote(root_layout),
+            on_mount: unquote(on_mount) do
             live("/companies", CompaniesLive.Index, :index)
             live("/companies/new", CompaniesLive.Show, :new)
             live("/companies/:id", CompaniesLive.Show, :show)

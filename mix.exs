@@ -33,14 +33,14 @@ defmodule Beeleex.MixProject do
   defp deps do
     [
       {:phoenix, ">= 1.6.15"},
-      {:phoenix_live_view, "~> 0.20"},
+      {:phoenix_live_view, "~> 0.20 or ~> 1.0"},
       {:phoenix_html, "~> 4.0"},
       {:phoenix_view, "~> 2.0"},
       {:phoenix_live_reload, "~> 1.4", only: :dev},
       {:esbuild, "~> 0.8", runtime: false},
-      {:telemetry_metrics, "~> 0.6"},
+      {:telemetry_metrics, "~> 0.6 or ~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
-      {:gettext, "~> 0.18"},
+      {:gettext, ">= 0.18.0"},
       {:jason, "~> 1.4"},
       {:plug_cowboy, "~> 2.5"},
       {:ex_geeks,

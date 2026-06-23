@@ -44,8 +44,17 @@ defmodule BeeleexWeb do
 
   def live_view do
     quote do
+      # The inner ("app") layout can be overridden by the host application so the
+      # billing pages render inside its own chrome (nav/sidebar). Host sets, e.g.:
+      #
+      #     config :beeleex, :live_layout, {MyAppWeb.Layouts, :beeleex}
+      #
+      # The host layout function receives the page's assigns (including `@flash`
+      # and anything assigned by an on_mount hook, e.g. `@current_user`) plus
+      # `@inner_content`. Wrap the content in an element with class `beeleex` so
+      # the shipped stylesheet applies.
       use Phoenix.LiveView,
-        layout: {BeeleexWeb.Layouts, :live}
+        layout: Application.compile_env(:beeleex, :live_layout, {BeeleexWeb.Layouts, :live})
 
       unquote(html_helpers())
     end
