@@ -15,11 +15,18 @@ and no Beelee tokens in the browser.
 
 ```
 Host LiveView (server)
-  -> Beeleex.Api.get_companies/get_company/create_company/...
-       ExGeeks.Helpers.endpoint_post_callback(url, %{query, variables}, headers)
-       headers = secure-key + bu-id          # server-to-server, never in browser
+  -> Beeleex.Api.get_companies(bu_token, ...) / get_company(bu_token, id) / ...
+       ExGeeks.Helpers.endpoint_post_callback(url, %{query, variables}, ui_headers(token))
+       ui_headers = bu-authorization (user's token) + bu-id   # per-user, never in browser
   -> Beelee GraphQL
 ```
+
+The `bu_token` is the signed-in user's `user_portal` token. The LiveViews read
+it server-side from the session via `BeeleexWeb.LiveSession.bu_token/1` (default
+session key `"bu_token"`, override with `config :beeleex, :bu_token_session_key`)
+and thread it into every `Beeleex.Api` call as `bu-authorization`. It is never
+exposed to the browser. The host app must place that token in the Plug session
+(e.g. in its auth pipeline) before the user reaches these pages.
 
 The LiveViews resolve their API module via
 `Application.compile_env(:beeleex, :api_module, Beeleex.Api)`, so production uses
@@ -101,11 +108,13 @@ The pages run through the macro-provided `:beeleex_browser` pipeline
 All added to `Beeleex.Api` (see [api-reference.md](../api-reference.md)) and
 declared in the `Beeleex.ApiBehaviour`:
 
-`get_companies/1`, `get_company/1`, `create_company/1`, `update_company/2`,
-`delete_company/1`, `get_unlinked_projects/1`, `link_projects/2`,
-`unlink_project/2`, `get_invoices/1`, `get_invoice/1`, `get_payment_methods/1`,
-`request_setup_intent/1`, `deactivate_payment_method/1`,
-`reactivate_payment_method/1`, `make_default_payment_method/2`.
+Each takes the user's `bu_token` as its first argument:
+
+`get_companies/2`, `get_company/2`, `create_company/2`, `update_company/3`,
+`delete_company/2`, `get_unlinked_projects/2`, `link_projects/3`,
+`unlink_project/3`, `get_invoices/2`, `get_invoice/2`, `get_payment_methods/2`,
+`request_setup_intent/2`, `deactivate_payment_method/2`,
+`reactivate_payment_method/2`, `make_default_payment_method/3`.
 
 These request only non-sensitive fields (they deliberately omit secrets such as
 `stripeSecretKey` / `secureKey` present in the Beelee schema).

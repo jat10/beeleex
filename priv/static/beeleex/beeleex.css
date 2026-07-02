@@ -221,6 +221,8 @@
   font-size: 0.85rem;
   font-weight: 550;
   margin-bottom: 0.3rem;
+  /* Set explicitly so a host app's global `label` color can't wash these out. */
+  color: var(--bx-text);
 }
 .bx-input {
   display: block;
@@ -255,6 +257,7 @@
   padding: 0 0.35rem;
   font-size: 0.85rem;
   font-weight: 550;
+  color: var(--bx-text);
 }
 .bx-form-actions {
   display: flex;

@@ -29,13 +29,13 @@ defmodule BeeleexWeb.PaymentMethodsLiveTest do
 
   setup do
     # The company show page also embeds the invoices list.
-    stub(Beeleex.ApiMock, :get_company, fn "1" -> {:ok, company()} end)
-    stub(Beeleex.ApiMock, :get_invoices, fn _ -> {:ok, %{invoices: [], total: 0, count: 0}} end)
+    stub(Beeleex.ApiMock, :get_company, fn _token, "1" -> {:ok, company()} end)
+    stub(Beeleex.ApiMock, :get_invoices, fn _token, _ -> {:ok, %{invoices: [], total: 0, count: 0}} end)
     :ok
   end
 
   test "lists a company's payment methods", %{conn: conn} do
-    stub(Beeleex.ApiMock, :get_payment_methods, fn opts ->
+    stub(Beeleex.ApiMock, :get_payment_methods, fn _token, opts ->
       assert [%{key: "company_id", value: "1"}] = Keyword.fetch!(opts, :filter)
       {:ok, %{payment_methods: [payment_method()], total: 1, count: 1}}
     end)
@@ -48,11 +48,13 @@ defmodule BeeleexWeb.PaymentMethodsLiveTest do
   end
 
   test "making a method default reloads the list", %{conn: conn} do
-    stub(Beeleex.ApiMock, :get_payment_methods, fn _opts ->
+    stub(Beeleex.ApiMock, :get_payment_methods, fn _token, _opts ->
       {:ok, %{payment_methods: [payment_method()], total: 1, count: 1}}
     end)
 
-    expect(Beeleex.ApiMock, :make_default_payment_method, fn 1, "5" -> {:ok, "stripe_card"} end)
+    expect(Beeleex.ApiMock, :make_default_payment_method, fn _token, 1, "5" ->
+      {:ok, "stripe_card"}
+    end)
 
     {:ok, view, _html} = live(conn, "/companies/1")
 
@@ -63,11 +65,11 @@ defmodule BeeleexWeb.PaymentMethodsLiveTest do
 
   test "adding a payment method requests a setup intent and pushes the Stripe event",
        %{conn: conn} do
-    stub(Beeleex.ApiMock, :get_payment_methods, fn _opts ->
+    stub(Beeleex.ApiMock, :get_payment_methods, fn _token, _opts ->
       {:ok, %{payment_methods: [], total: 0, count: 0}}
     end)
 
-    expect(Beeleex.ApiMock, :request_setup_intent, fn 1 ->
+    expect(Beeleex.ApiMock, :request_setup_intent, fn _token, 1 ->
       {:ok, %{client_secret: "seti_secret_123", publishable_key: "pk_test_1", verified: true}}
     end)
 
@@ -84,11 +86,11 @@ defmodule BeeleexWeb.PaymentMethodsLiveTest do
   end
 
   test "deactivating a method calls the API", %{conn: conn} do
-    stub(Beeleex.ApiMock, :get_payment_methods, fn _opts ->
+    stub(Beeleex.ApiMock, :get_payment_methods, fn _token, _opts ->
       {:ok, %{payment_methods: [payment_method()], total: 1, count: 1}}
     end)
 
-    expect(Beeleex.ApiMock, :deactivate_payment_method, fn "5" -> {:ok, "deactivated"} end)
+    expect(Beeleex.ApiMock, :deactivate_payment_method, fn _token, "5" -> {:ok, "deactivated"} end)
 
     {:ok, view, _html} = live(conn, "/companies/1")
 

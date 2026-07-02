@@ -51,14 +51,14 @@ defmodule BeeleexWeb.CompaniesLive.FormComponent do
   end
 
   defp save(socket, :new, data) do
-    case @api.create_company(to_input(data)) do
+    case @api.create_company(socket.assigns.bu_token, to_input(data)) do
       {:ok, company} -> notify(socket, company)
       {:error, message} -> {:noreply, assign(socket, :error_message, message)}
     end
   end
 
   defp save(socket, :edit, data) do
-    case @api.update_company(socket.assigns.company.id, to_input(data)) do
+    case @api.update_company(socket.assigns.bu_token, socket.assigns.company.id, to_input(data)) do
       {:ok, company} -> notify(socket, company)
       {:error, message} -> {:noreply, assign(socket, :error_message, message)}
     end
@@ -75,7 +75,7 @@ defmodule BeeleexWeb.CompaniesLive.FormComponent do
     <div>
       <.flash_alert :if={@error_message} kind={:error}><%= @error_message %></.flash_alert>
       <.form for={@form} phx-target={@myself} phx-change="validate" phx-submit="save">
-        <.input field={@form[:name]} label={gettext("Name")} required />
+        <.input field={@form[:name]} label={gettext("Company Name")} required />
         <.input field={@form[:email]} label={gettext("Email")} type="email" required />
         <.input field={@form[:phone_number]} label={gettext("Phone")} />
         <.input field={@form[:vat_number]} label={gettext("VAT number")} />

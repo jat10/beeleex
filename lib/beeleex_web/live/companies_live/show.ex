@@ -12,8 +12,14 @@ defmodule BeeleexWeb.CompaniesLive.Show do
   @api Application.compile_env(:beeleex, :api_module, Beeleex.Api)
 
   @impl true
-  def mount(_params, _session, socket) do
-    {:ok, assign(socket, companies_path: "/companies", company: nil, unlinked_projects: [])}
+  def mount(_params, session, socket) do
+    {:ok,
+     assign(socket,
+       companies_path: "/companies",
+       company: nil,
+       unlinked_projects: [],
+       bu_token: BeeleexWeb.LiveSession.bu_token(session)
+     )}
   end
 
   @impl true
@@ -24,27 +30,34 @@ defmodule BeeleexWeb.CompaniesLive.Show do
 
   defp apply_action(socket, :new, _params) do
     socket
-    |> assign(:page_title, gettext("New company"))
+    |> assign(:page_title, gettext("New Billing"))
     |> assign(:company, %Beeleex.Company{})
   end
 
+  # Skip the Beelee fetch during the static (disconnected) render — it would be
+  # thrown away and refetched on connect, and each fetch triggers a Beelee
+  # `verify_token` callback. Load only once the socket is connected.
   defp apply_action(socket, action, %{"id" => id}) when action in [:show, :edit] do
-    case @api.get_company(id) do
-      {:ok, company} ->
-        socket
-        |> assign(:page_title, company.name || gettext("Company"))
-        |> assign(:company, company)
+    if connected?(socket) do
+      case @api.get_company(socket.assigns.bu_token, id) do
+        {:ok, company} ->
+          socket
+          |> assign(:page_title, company.name || gettext("Company"))
+          |> assign(:company, company)
 
-      {:error, message} ->
-        socket
-        |> put_flash(:error, message)
-        |> push_navigate(to: socket.assigns.companies_path)
+        {:error, message} ->
+          socket
+          |> put_flash(:error, message)
+          |> push_navigate(to: socket.assigns.companies_path)
+      end
+    else
+      assign(socket, :page_title, gettext("Company"))
     end
   end
 
   @impl true
   def handle_event("delete", _params, socket) do
-    case @api.delete_company(socket.assigns.company.id) do
+    case @api.delete_company(socket.assigns.bu_token, socket.assigns.company.id) do
       {:ok, _message} ->
         {:noreply,
          socket
@@ -57,7 +70,7 @@ defmodule BeeleexWeb.CompaniesLive.Show do
   end
 
   def handle_event("unlink_project", %{"project" => project_id}, socket) do
-    case @api.unlink_project(socket.assigns.company.id, project_id) do
+    case @api.unlink_project(socket.assigns.bu_token, socket.assigns.company.id, project_id) do
       {:ok, company} ->
         {:noreply,
          socket
@@ -70,7 +83,7 @@ defmodule BeeleexWeb.CompaniesLive.Show do
   end
 
   def handle_event("link_project", %{"project" => project_id}, socket) do
-    case @api.link_projects(socket.assigns.company.id, [project_id]) do
+    case @api.link_projects(socket.assigns.bu_token, socket.assigns.company.id, [project_id]) do
       {:ok, company} ->
         {:noreply,
          socket
@@ -89,19 +102,30 @@ defmodule BeeleexWeb.CompaniesLive.Show do
 
   # Payment methods changed: refresh the company so the counts stay in sync.
   def handle_info({:payment_methods_updated, _company_id}, socket) do
-    case @api.get_company(socket.assigns.company.id) do
+    case @api.get_company(socket.assigns.bu_token, socket.assigns.company.id) do
       {:ok, company} -> {:noreply, assign(socket, :company, company)}
       {:error, _} -> {:noreply, socket}
     end
   end
 
+  # The static (disconnected) render leaves `@company` nil — data is loaded only
+  # once connected. Show a lightweight placeholder until the socket connects.
   @impl true
+  def render(%{company: nil} = assigns) do
+    ~H"""
+    <div class="bx-page">
+      <.link navigate={@companies_path} class="bx-back"><%= gettext("← Back to companies") %></.link>
+      <p class="bx-muted"><%= gettext("Loading…") %></p>
+    </div>
+    """
+  end
+
   def render(%{live_action: action} = assigns) when action in [:new, :edit] do
     ~H"""
     <div class="bx-page">
       <.link navigate={@companies_path} class="bx-back"><%= gettext("← Back") %></.link>
       <h1 class="bx-title">
-        <%= if @live_action == :new, do: gettext("New company"), else: gettext("Edit company") %>
+        <%= if @live_action == :new, do: gettext("New Billing"), else: gettext("Edit company") %>
       </h1>
       <div class="bx-card">
         <.live_component
@@ -109,6 +133,7 @@ defmodule BeeleexWeb.CompaniesLive.Show do
           id={@company.id || :new}
           action={@live_action}
           company={@company}
+          bu_token={@bu_token}
           return_to={@companies_path}
         />
       </div>
@@ -175,6 +200,7 @@ defmodule BeeleexWeb.CompaniesLive.Show do
           module={BeeleexWeb.InvoicesLive.ListComponent}
           id={"company-#{@company.id}-invoices"}
           company_id={@company.id}
+          bu_token={@bu_token}
           companies_path={@companies_path}
         />
       </section>
@@ -185,6 +211,7 @@ defmodule BeeleexWeb.CompaniesLive.Show do
           module={BeeleexWeb.PaymentMethodsLive.ListComponent}
           id={"company-#{@company.id}-payment-methods"}
           company_id={@company.id}
+          bu_token={@bu_token}
         />
       </section>
 

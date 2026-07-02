@@ -7,15 +7,20 @@ defmodule BeeleexWeb.InvoicesLive.Show do
   @api Application.compile_env(:beeleex, :api_module, Beeleex.Api)
 
   @impl true
-  def mount(_params, _session, socket) do
-    {:ok, assign(socket, company_path: "/companies", invoice: nil)}
+  def mount(_params, session, socket) do
+    {:ok,
+     assign(socket,
+       company_path: "/companies",
+       invoice: nil,
+       bu_token: BeeleexWeb.LiveSession.bu_token(session)
+     )}
   end
 
   @impl true
   def handle_params(%{"id" => company_id, "invoice_id" => invoice_id}, uri, socket) do
     company_path = companies_base(uri) <> "/#{company_id}"
 
-    case @api.get_invoice(invoice_id) do
+    case @api.get_invoice(socket.assigns.bu_token, invoice_id) do
       {:ok, invoice} ->
         {:noreply,
          socket

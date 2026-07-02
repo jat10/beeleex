@@ -15,8 +15,39 @@ defmodule Beeleex.Api do
     [
       {"content-type", "application/json"},
       {"secure-key", Application.get_env(:beeleex, :business_unit_secure_key)},
-      {"bu-id", Application.get_env(:beeleex, :business_unit_id)}
+      {"bu-id", bu_id()}
     ]
+  end
+
+  # Headers for the user-facing back-office UI calls. Unlike the server-to-server
+  # `headers/0` (which authenticates with the BU `secure-key`), these act on
+  # behalf of the signed-in end user, so they relay that user's token via
+  # `bu-authorization` alongside the `bu-id`. `token` is threaded from the
+  # LiveView session (see `BeeleexWeb.LiveSession`).
+  defp ui_headers(token) do
+    headers = [
+      {"content-type", "application/json"},
+      {"bu-authorization", "Bearer " <> to_string(token)},
+      {"bu-id", bu_id()}
+    ]
+
+    headers
+  end
+
+  # HTTPoison/hackney requires string header values — an integer `bu-id` would be
+  # sent as a raw byte, not its digits. Always coerce to a string.
+  defp bu_id, do: to_string(Application.get_env(:beeleex, :business_unit_id))
+
+  # Beelee's GraphQL declares `$id: Int!`, so string ids (e.g. from URL params)
+  # must be coerced to integers before being sent as variables.
+  defp to_int(value) when is_integer(value), do: value
+  defp to_int(value) when is_binary(value), do: String.to_integer(value)
+
+  # Masks a secret for debug logging: keeps only the last 4 chars.
+  defp mask(""), do: "<empty>"
+
+  defp mask(value) when is_binary(value) do
+    "***" <> String.slice(value, -4, 4) <> " (len=#{String.length(value)})"
   end
 
   @doc """
@@ -412,9 +443,10 @@ defmodule Beeleex.Api do
   # --------------------------------------------------------------------------
   # Company back-office UI operations
   #
-  # These functions power the Beeleex LiveView pages. They use the same
-  # server-to-server auth (`secure-key` + `bu-id`) as the rest of this module,
-  # so the BU credentials never reach the browser.
+  # These functions power the Beeleex LiveView pages. They act on behalf of the
+  # signed-in end user, authenticating with `bu-authorization` (the user's
+  # `user_portal` token, threaded in as the first argument) + `bu-id`. The token
+  # never reaches the browser — it is read server-side from the LiveView session.
   #
   # The selected fields intentionally exclude secrets present in the Beelee
   # `Company` schema (e.g. `stripeSecretKey`, `secureKey`); only the data the
@@ -431,10 +463,10 @@ defmodule Beeleex.Api do
 
   Returns `{:ok, %{companies: [%Beeleex.Company{}], total: integer, count: integer}}`.
   """
-  @spec get_companies(keyword) ::
+  @spec get_companies(String.t(), keyword) ::
           {:ok, %{companies: list(Beeleex.Company.t()), total: integer, count: integer}}
           | {:error, String.t()}
-  def get_companies(opts \\ []) do
+  def get_companies(token, opts \\ []) do
     filter = Keyword.get(opts, :filter, [])
     size = Keyword.get(opts, :size, 20)
     skip = Keyword.get(opts, :skip, 0)
@@ -453,7 +485,7 @@ defmodule Beeleex.Api do
              """,
              variables: %{filter: filter, size: size, skip: skip}
            },
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{"getCompanies" => %{"companies" => companies} = result}} ->
         {:ok,
@@ -471,9 +503,9 @@ defmodule Beeleex.Api do
   @doc """
   Fetch a single company by its Beelee id.
   """
-  @spec get_company(integer | String.t()) ::
+  @spec get_company(String.t(), integer | String.t()) ::
           {:ok, Beeleex.Company.t()} | {:error, String.t()}
-  def get_company(id) do
+  def get_company(token, id) do
     case ExGeeks.Helpers.endpoint_post_callback(
            url(),
            %{
@@ -482,9 +514,9 @@ defmodule Beeleex.Api do
                getCompany(id:$id) { #{company_fields()} }
              }
              """,
-             variables: %{id: id}
+             variables: %{id: to_int(id)}
            },
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{"getCompany" => company}} when not is_nil(company) ->
         {:ok, parse_company(company)}
@@ -498,9 +530,10 @@ defmodule Beeleex.Api do
   Create a company. `company_input` must match the Beelee `CompanyInput` shape
   (camelCase keys, e.g. `%{name:, email:, phoneNumber:, vatNumber:, address: %{...}}`).
   """
-  @spec create_company(map) :: {:ok, Beeleex.Company.t()} | {:error, String.t()}
-  def create_company(company_input) do
+  @spec create_company(String.t(), map) :: {:ok, Beeleex.Company.t()} | {:error, String.t()}
+  def create_company(token, company_input) do
     mutate_company(
+      token,
       """
       mutation createCompany($company:CompanyInput!) {
         createCompany(company:$company) { #{company_fields()} }
@@ -515,10 +548,11 @@ defmodule Beeleex.Api do
   @doc """
   Update the company identified by `id` with the given `CompanyInput` map.
   """
-  @spec update_company(integer | String.t(), map) ::
+  @spec update_company(String.t(), integer | String.t(), map) ::
           {:ok, Beeleex.Company.t()} | {:error, String.t()}
-  def update_company(id, company_input) do
+  def update_company(token, id, company_input) do
     mutate_company(
+      token,
       """
       mutation editCompany($company:CompanyInput!, $id:Int!) {
         editCompany(company:$company, id:$id) { #{company_fields()} }
@@ -533,8 +567,9 @@ defmodule Beeleex.Api do
   @doc """
   Delete the company identified by `id`. Returns `{:ok, message}`.
   """
-  @spec delete_company(integer | String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def delete_company(id) do
+  @spec delete_company(String.t(), integer | String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def delete_company(token, id) do
     case ExGeeks.Helpers.endpoint_post_callback(
            url(),
            %{
@@ -545,7 +580,7 @@ defmodule Beeleex.Api do
              """,
              variables: %{id: id}
            },
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{"deleteCompany" => %{"message" => message}}} ->
         {:ok, message}
@@ -559,8 +594,9 @@ defmodule Beeleex.Api do
   Return the customer projects that are available to link (i.e. not yet linked
   to any company). `project_ids` is the list of candidate `CustomerProject` ids.
   """
-  @spec get_unlinked_projects(list(String.t())) :: {:ok, list(String.t())} | {:error, String.t()}
-  def get_unlinked_projects(project_ids) do
+  @spec get_unlinked_projects(String.t(), list(String.t())) ::
+          {:ok, list(String.t())} | {:error, String.t()}
+  def get_unlinked_projects(token, project_ids) do
     case ExGeeks.Helpers.endpoint_post_callback(
            url(),
            %{
@@ -571,7 +607,7 @@ defmodule Beeleex.Api do
              """,
              variables: %{projectIds: project_ids}
            },
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{"getUnlinkedProjects" => projects}} ->
         {:ok, projects || []}
@@ -585,10 +621,11 @@ defmodule Beeleex.Api do
   Link one or more customer projects to the company identified by `id`.
   `project_ids` is a list of `CustomerProject` values.
   """
-  @spec link_projects(integer | String.t(), list) ::
+  @spec link_projects(String.t(), integer | String.t(), list) ::
           {:ok, Beeleex.Company.t()} | {:error, String.t()}
-  def link_projects(id, project_ids) do
+  def link_projects(token, id, project_ids) do
     mutate_company(
+      token,
       """
       mutation linkCustomerProject($id:Int!, $projectIds: [CustomerProject]) {
         linkCustomerProject(id:$id, projectIds: $projectIds) { #{company_fields()} }
@@ -603,10 +640,11 @@ defmodule Beeleex.Api do
   @doc """
   Unlink a single customer project from the company identified by `id`.
   """
-  @spec unlink_project(integer | String.t(), any) ::
+  @spec unlink_project(String.t(), integer | String.t(), any) ::
           {:ok, Beeleex.Company.t()} | {:error, String.t()}
-  def unlink_project(id, project_id) do
+  def unlink_project(token, id, project_id) do
     mutate_company(
+      token,
       """
       mutation unlinkCustomerProject($id:Int!, $projectId: CustomerProject) {
         unlinkCustomerProject(id:$id, projectId: $projectId) { #{company_fields()} }
@@ -626,10 +664,10 @@ defmodule Beeleex.Api do
 
   Returns `{:ok, %{invoices: [%Beeleex.Invoice{}], total: integer, count: integer}}`.
   """
-  @spec get_invoices(keyword) ::
+  @spec get_invoices(String.t(), keyword) ::
           {:ok, %{invoices: list(Beeleex.Invoice.t()), total: integer, count: integer}}
           | {:error, String.t()}
-  def get_invoices(opts \\ []) do
+  def get_invoices(token, opts \\ []) do
     filter = Keyword.get(opts, :filter, [])
     size = Keyword.get(opts, :size, 20)
     skip = Keyword.get(opts, :skip, 0)
@@ -648,7 +686,7 @@ defmodule Beeleex.Api do
              """,
              variables: %{filter: filter, size: size, skip: skip}
            },
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{"getInvoices" => %{"invoices" => invoices} = result}} ->
         {:ok,
@@ -666,8 +704,9 @@ defmodule Beeleex.Api do
   @doc """
   Fetch a single invoice by its Beelee id.
   """
-  @spec get_invoice(integer | String.t()) :: {:ok, Beeleex.Invoice.t()} | {:error, String.t()}
-  def get_invoice(id) do
+  @spec get_invoice(String.t(), integer | String.t()) ::
+          {:ok, Beeleex.Invoice.t()} | {:error, String.t()}
+  def get_invoice(token, id) do
     case ExGeeks.Helpers.endpoint_post_callback(
            url(),
            %{
@@ -678,7 +717,7 @@ defmodule Beeleex.Api do
              """,
              variables: %{id: id}
            },
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{"getInvoice" => invoice}} when not is_nil(invoice) ->
         {:ok, parse_invoice(invoice)}
@@ -697,10 +736,10 @@ defmodule Beeleex.Api do
   `:default_payment_method`, `:stripe_card` => `%{:brand, :last4, :exp_month,
   :exp_year}`, ...).
   """
-  @spec get_payment_methods(keyword) ::
+  @spec get_payment_methods(String.t(), keyword) ::
           {:ok, %{payment_methods: list(map), total: integer, count: integer}}
           | {:error, String.t()}
-  def get_payment_methods(opts \\ []) do
+  def get_payment_methods(token, opts \\ []) do
     filter = Keyword.get(opts, :filter, [])
     size = Keyword.get(opts, :size, 20)
     skip = Keyword.get(opts, :skip, 0)
@@ -727,7 +766,7 @@ defmodule Beeleex.Api do
              """,
              variables: %{filter: filter, size: size, skip: skip}
            },
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{"getPaymentMethods" => %{"paymentMethods" => methods} = result}} ->
         {:ok,
@@ -750,10 +789,10 @@ defmodule Beeleex.Api do
   identified by `company_id`. The returned `client_secret` and `publishable_key`
   are confirmed client-side with Stripe.js (see the Beeleex Stripe LiveView hook).
   """
-  @spec request_setup_intent(integer | String.t()) ::
+  @spec request_setup_intent(String.t(), integer | String.t()) ::
           {:ok, %{client_secret: String.t(), publishable_key: String.t(), verified: boolean}}
           | {:error, String.t()}
-  def request_setup_intent(company_id) do
+  def request_setup_intent(token, company_id) do
     case ExGeeks.Helpers.endpoint_post_callback(
            url(),
            %{
@@ -768,7 +807,7 @@ defmodule Beeleex.Api do
              """,
              variables: %{id: company_id}
            },
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{"requestSetupIntent" => intent}} when not is_nil(intent) ->
         {:ok,
@@ -778,6 +817,19 @@ defmodule Beeleex.Api do
            verified: intent["verified"]
          }}
 
+      # Beelee returns a 500 (`{:error, %{"errors" => %{"detail" => ...}}}`) when it
+      # cannot create the Stripe SetupIntent — almost always because Stripe is not
+      # configured for this Business Unit. Surface an actionable message.
+      {:error, %{"errors" => %{"detail" => _}}} = response ->
+        Logger.error(
+          "[beeleex] request_setup_intent raw Beelee response: " <>
+            inspect(response, limit: :infinity, printable_limit: :infinity)
+        )
+
+        {:error,
+         "Online payments aren't available yet for this account. " <>
+           "Please contact your administrator to enable Stripe payments."}
+
       response ->
         graphql_error(response, "request_setup_intent")
     end
@@ -786,10 +838,11 @@ defmodule Beeleex.Api do
   @doc """
   Deactivate the payment method identified by `id`. Returns `{:ok, status}`.
   """
-  @spec deactivate_payment_method(integer | String.t()) ::
+  @spec deactivate_payment_method(String.t(), integer | String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
-  def deactivate_payment_method(id) do
+  def deactivate_payment_method(token, id) do
     payment_method_status_mutation(
+      token,
       """
       mutation deactivatePaymentMethod($id:Int!) {
         deactivatePaymentMethod(id:$id) { status }
@@ -804,10 +857,11 @@ defmodule Beeleex.Api do
   @doc """
   Retry (reactivate) the payment method identified by `id`. Returns `{:ok, status}`.
   """
-  @spec reactivate_payment_method(integer | String.t()) ::
+  @spec reactivate_payment_method(String.t(), integer | String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
-  def reactivate_payment_method(id) do
+  def reactivate_payment_method(token, id) do
     payment_method_status_mutation(
+      token,
       """
       mutation retryPaymentMethod($id:Int!) {
         retryPaymentMethod(id:$id) { status }
@@ -823,9 +877,9 @@ defmodule Beeleex.Api do
   Make `payment_id` the default payment method for `company_id`.
   Returns `{:ok, type}`.
   """
-  @spec make_default_payment_method(integer | String.t(), integer | String.t()) ::
+  @spec make_default_payment_method(String.t(), integer | String.t(), integer | String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
-  def make_default_payment_method(company_id, payment_id) do
+  def make_default_payment_method(token, company_id, payment_id) do
     case ExGeeks.Helpers.endpoint_post_callback(
            url(),
            %{
@@ -838,7 +892,7 @@ defmodule Beeleex.Api do
              """,
              variables: %{companyId: company_id, paymentId: payment_id}
            },
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{"changeDefaultPaymentMethod" => %{"type" => type}}} ->
         {:ok, type}
@@ -850,11 +904,11 @@ defmodule Beeleex.Api do
 
   # -- shared helpers for the company UI operations --------------------------
 
-  defp mutate_company(query, variables, data_key, fn_name) do
+  defp mutate_company(token, query, variables, data_key, fn_name) do
     case ExGeeks.Helpers.endpoint_post_callback(
            url(),
            %{query: query, variables: variables},
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{^data_key => company}} when not is_nil(company) ->
         {:ok, parse_company(company)}
@@ -876,11 +930,11 @@ defmodule Beeleex.Api do
     |> then(&struct(Beeleex.Invoice, &1))
   end
 
-  defp payment_method_status_mutation(query, variables, data_key, fn_name) do
+  defp payment_method_status_mutation(token, query, variables, data_key, fn_name) do
     case ExGeeks.Helpers.endpoint_post_callback(
            url(),
            %{query: query, variables: variables},
-           headers()
+           ui_headers(token)
          ) do
       %{"data" => %{^data_key => %{"status" => status}}} ->
         {:ok, status}
@@ -890,14 +944,26 @@ defmodule Beeleex.Api do
     end
   end
 
-  defp graphql_error(%{"errors" => errors}, fn_name) when is_list(errors) do
+  defp graphql_error(%{"errors" => errors} = response, fn_name) when is_list(errors) do
     error = List.first(errors)["message"]
     Logger.error("#{fn_name}: #{error}")
+
+    Logger.error(
+      "[beeleex] #{fn_name} raw Beelee response: " <>
+        inspect(response, limit: :infinity, printable_limit: :infinity)
+    )
+
     {:error, error}
   end
 
-  defp graphql_error(_response, fn_name) do
+  defp graphql_error(response, fn_name) do
     Logger.error("#{fn_name}: unexpected response from Beelee")
+
+    Logger.error(
+      "[beeleex] #{fn_name} raw Beelee response: " <>
+        inspect(response, limit: :infinity, printable_limit: :infinity)
+    )
+
     {:error, "unexpected response from Beelee"}
   end
 

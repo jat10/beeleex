@@ -80,17 +80,43 @@ const BeeleexStripeSetup = {
     const confirmButton = this.el.querySelector("[data-beeleex-confirm-card]");
     if (!container || !confirmButton) return;
 
-    const elements = this.stripe.elements();
-    this.card = elements.create("card");
-    this.card.mount(container);
+    if (!this.stripe) {
+      this.setError("Stripe could not be initialized. Check the publishable key.");
+      return;
+    }
+
+    // Re-opening the modal creates a fresh container, so tear down any element
+    // from a previous open before mounting a new one.
+    if (this.card) this.card.unmount();
+
+    try {
+      const elements = this.stripe.elements();
+      this.card = elements.create("card");
+      this.card.mount(container);
+    } catch (error) {
+      this.setError((error && error.message) || "Could not display the card form.");
+      return;
+    }
+
     this.card.on("change", (event) => this.setError(event.error ? event.error.message : ""));
 
+    // Avoid stacking duplicate click handlers across re-opens.
+    if (this.confirmHandler) confirmButton.removeEventListener("click", this.confirmHandler);
     this.confirmHandler = () => this.confirmCard(confirmButton);
     confirmButton.addEventListener("click", this.confirmHandler);
   },
 
   async confirmCard(confirmButton) {
-    if (!this.stripe || !this.clientSecret) return;
+    console.log("[beeleex] confirmCard clicked", {
+      hasStripe: !!this.stripe,
+      hasClientSecret: !!this.clientSecret,
+      clientSecret: this.clientSecret
+    });
+
+    if (!this.stripe || !this.clientSecret) {
+      console.warn("[beeleex] confirmCard aborted: stripe or clientSecret missing");
+      return;
+    }
     confirmButton.disabled = true;
 
     const result = await this.stripe.confirmCardSetup(this.clientSecret, {
@@ -99,17 +125,30 @@ const BeeleexStripeSetup = {
 
     confirmButton.disabled = false;
 
+    console.log("[beeleex] confirmCardSetup result", {
+      error: result.error,
+      status: result.setupIntent && result.setupIntent.status,
+      payment_method: result.setupIntent && result.setupIntent.payment_method
+    });
+
     if (result.error) {
+      console.error("[beeleex] confirmCardSetup error:", result.error.message);
       this.setError(result.error.message);
       return;
     }
 
     if (result.setupIntent && result.setupIntent.status === "succeeded") {
       this.setError("");
+      console.log("[beeleex] pushing payment_method_added ->", result.setupIntent.payment_method);
       // Notify the owning LiveComponent so it can refresh its list.
       this.pushEventTo(this.el, "payment_method_added", {
         payment_method: result.setupIntent.payment_method
       });
+    } else {
+      console.warn(
+        "[beeleex] setupIntent did not succeed; status =",
+        result.setupIntent && result.setupIntent.status
+      );
     }
   },
 

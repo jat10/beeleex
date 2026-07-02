@@ -12,11 +12,11 @@ defmodule BeeleexWeb.CompaniesLiveTest do
   # The company details page embeds the invoices and payment-methods components,
   # which load on mount. Provide harmless defaults for tests that don't care.
   setup do
-    stub(Beeleex.ApiMock, :get_invoices, fn _opts ->
+    stub(Beeleex.ApiMock, :get_invoices, fn _token, _opts ->
       {:ok, %{invoices: [], total: 0, count: 0}}
     end)
 
-    stub(Beeleex.ApiMock, :get_payment_methods, fn _opts ->
+    stub(Beeleex.ApiMock, :get_payment_methods, fn _token, _opts ->
       {:ok, %{payment_methods: [], total: 0, count: 0}}
     end)
 
@@ -44,7 +44,7 @@ defmodule BeeleexWeb.CompaniesLiveTest do
 
   describe "Index" do
     test "lists companies", %{conn: conn} do
-      stub(Beeleex.ApiMock, :get_companies, fn _opts ->
+      stub(Beeleex.ApiMock, :get_companies, fn _token, _opts ->
         {:ok, %{companies: [company(), company(%{id: 2, name: "Globex"})], total: 2, count: 2}}
       end)
 
@@ -56,7 +56,7 @@ defmodule BeeleexWeb.CompaniesLiveTest do
     end
 
     test "shows an error flash when the API fails", %{conn: conn} do
-      stub(Beeleex.ApiMock, :get_companies, fn _opts -> {:error, "boom"} end)
+      stub(Beeleex.ApiMock, :get_companies, fn _token, _opts -> {:error, "boom"} end)
 
       {:ok, _view, html} = live(conn, "/companies")
 
@@ -65,7 +65,7 @@ defmodule BeeleexWeb.CompaniesLiveTest do
     end
 
     test "searching patches with the query", %{conn: conn} do
-      stub(Beeleex.ApiMock, :get_companies, fn _opts ->
+      stub(Beeleex.ApiMock, :get_companies, fn _token, _opts ->
         {:ok, %{companies: [company()], total: 1, count: 1}}
       end)
 
@@ -81,7 +81,7 @@ defmodule BeeleexWeb.CompaniesLiveTest do
 
   describe "Show" do
     test "renders a company's details", %{conn: conn} do
-      stub(Beeleex.ApiMock, :get_company, fn "1" -> {:ok, company()} end)
+      stub(Beeleex.ApiMock, :get_company, fn _token, "1" -> {:ok, company()} end)
 
       {:ok, _view, html} = live(conn, "/companies/1")
 
@@ -91,8 +91,8 @@ defmodule BeeleexWeb.CompaniesLiveTest do
     end
 
     test "deletes a company and redirects to the list", %{conn: conn} do
-      stub(Beeleex.ApiMock, :get_company, fn "1" -> {:ok, company()} end)
-      expect(Beeleex.ApiMock, :delete_company, fn 1 -> {:ok, "deleted"} end)
+      stub(Beeleex.ApiMock, :get_company, fn _token, "1" -> {:ok, company()} end)
+      expect(Beeleex.ApiMock, :delete_company, fn _token, 1 -> {:ok, "deleted"} end)
 
       {:ok, view, _html} = live(conn, "/companies/1")
 
@@ -102,9 +102,9 @@ defmodule BeeleexWeb.CompaniesLiveTest do
     end
 
     test "unlinks a project", %{conn: conn} do
-      stub(Beeleex.ApiMock, :get_company, fn "1" -> {:ok, company()} end)
+      stub(Beeleex.ApiMock, :get_company, fn _token, "1" -> {:ok, company()} end)
 
-      expect(Beeleex.ApiMock, :unlink_project, fn 1, "proj-a" ->
+      expect(Beeleex.ApiMock, :unlink_project, fn _token, 1, "proj-a" ->
         {:ok, company(%{customer_projects: []})}
       end)
 
@@ -119,7 +119,7 @@ defmodule BeeleexWeb.CompaniesLiveTest do
 
   describe "New" do
     test "creates a company and redirects to it", %{conn: conn} do
-      expect(Beeleex.ApiMock, :create_company, fn input ->
+      expect(Beeleex.ApiMock, :create_company, fn _token, input ->
         assert input.name == "New Co"
         assert input.email == "new@co.test"
         {:ok, company(%{id: 7, name: "New Co"})}

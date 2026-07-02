@@ -9,8 +9,13 @@ defmodule BeeleexWeb.CompaniesLive.Index do
   @page_size 20
 
   @impl true
-  def mount(_params, _session, socket) do
-    {:ok, assign(socket, page_title: gettext("Companies"), companies_path: "/companies")}
+  def mount(_params, session, socket) do
+    {:ok,
+     assign(socket,
+       page_title: gettext("Companies"),
+       companies_path: "/companies",
+       bu_token: BeeleexWeb.LiveSession.bu_token(session)
+     )}
   end
 
   @impl true
@@ -28,10 +33,28 @@ defmodule BeeleexWeb.CompaniesLive.Index do
     {:noreply, socket}
   end
 
+  # Skip the Beelee fetch during the static (disconnected) render — it would be
+  # discarded and refetched on connect, and each fetch triggers a Beelee
+  # `verify_token` callback. Assign empty state until the socket connects.
   defp load_companies(socket, page, q) do
+    if connected?(socket) do
+      fetch_companies(socket, page, q)
+    else
+      socket
+      |> assign(:companies, [])
+      |> assign(:total, 0)
+      |> assign(:size, @page_size)
+    end
+  end
+
+  defp fetch_companies(socket, page, q) do
     skip = (page - 1) * @page_size
 
-    case @api.get_companies(filter: build_filter(q), size: @page_size, skip: skip) do
+    case @api.get_companies(socket.assigns.bu_token,
+           filter: build_filter(q),
+           size: @page_size,
+           skip: skip
+         ) do
       {:ok, %{companies: companies, total: total}} ->
         socket
         |> assign(:companies, companies)

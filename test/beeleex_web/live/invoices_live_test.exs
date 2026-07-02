@@ -9,7 +9,7 @@ defmodule BeeleexWeb.InvoicesLiveTest do
 
   # The company show page also embeds the payment-methods component.
   setup do
-    stub(Beeleex.ApiMock, :get_payment_methods, fn _ ->
+    stub(Beeleex.ApiMock, :get_payment_methods, fn _token, _ ->
       {:ok, %{payment_methods: [], total: 0, count: 0}}
     end)
 
@@ -44,9 +44,9 @@ defmodule BeeleexWeb.InvoicesLiveTest do
 
   describe "embedded invoices list (company show)" do
     test "lists the company's invoices", %{conn: conn} do
-      stub(Beeleex.ApiMock, :get_company, fn "1" -> {:ok, company()} end)
+      stub(Beeleex.ApiMock, :get_company, fn _token, "1" -> {:ok, company()} end)
 
-      stub(Beeleex.ApiMock, :get_invoices, fn opts ->
+      stub(Beeleex.ApiMock, :get_invoices, fn _token, opts ->
         assert [%{key: "company_id", value: "1"}] = Keyword.fetch!(opts, :filter)
         {:ok, %{invoices: [invoice()], total: 1, count: 1}}
       end)
@@ -60,7 +60,7 @@ defmodule BeeleexWeb.InvoicesLiveTest do
 
   describe "invoice detail" do
     test "renders a single invoice", %{conn: conn} do
-      stub(Beeleex.ApiMock, :get_invoice, fn "42" -> {:ok, invoice()} end)
+      stub(Beeleex.ApiMock, :get_invoice, fn _token, "42" -> {:ok, invoice()} end)
 
       {:ok, _view, html} = live(conn, "/companies/1/invoices/42")
 
@@ -71,7 +71,7 @@ defmodule BeeleexWeb.InvoicesLiveTest do
     end
 
     test "redirects to the company when the invoice is missing", %{conn: conn} do
-      stub(Beeleex.ApiMock, :get_invoice, fn "99" -> {:error, "not found"} end)
+      stub(Beeleex.ApiMock, :get_invoice, fn _token, "99" -> {:error, "not found"} end)
 
       assert {:error, {:live_redirect, %{to: "/companies/1"}}} =
                live(conn, "/companies/1/invoices/99")

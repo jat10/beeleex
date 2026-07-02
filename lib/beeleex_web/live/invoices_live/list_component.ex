@@ -10,6 +10,7 @@ defmodule BeeleexWeb.InvoicesLive.ListComponent do
 
     * `:id` - the component id
     * `:company_id` - the company whose invoices to list
+    * `:bu_token` - the signed-in user's Beelee token (for `bu-authorization`)
     * `:companies_path` - base path used to build invoice detail links
   """
   use BeeleexWeb, :live_component
@@ -21,11 +22,14 @@ defmodule BeeleexWeb.InvoicesLive.ListComponent do
   def update(assigns, socket) do
     socket = assign(socket, assigns)
 
+    # Skip the Beelee fetch during the static (disconnected) render — it would be
+    # discarded and refetched on connect, and each fetch triggers a Beelee
+    # `verify_token` callback. Fetch only once, on the connected render.
     socket =
-      if socket.assigns[:loaded] do
-        socket
-      else
-        load(socket, 1)
+      cond do
+        socket.assigns[:loaded] -> socket
+        connected?(socket) -> load(socket, 1)
+        true -> assign(socket, invoices: [], total: 0, page: 1, size: @page_size, error: nil)
       end
 
     {:ok, socket}
@@ -40,7 +44,7 @@ defmodule BeeleexWeb.InvoicesLive.ListComponent do
     skip = (page - 1) * @page_size
     filter = [%{key: "company_id", value: to_string(socket.assigns.company_id)}]
 
-    case @api.get_invoices(filter: filter, size: @page_size, skip: skip) do
+    case @api.get_invoices(socket.assigns.bu_token, filter: filter, size: @page_size, skip: skip) do
       {:ok, %{invoices: invoices, total: total}} ->
         socket
         |> assign(invoices: invoices, total: total, page: page, size: @page_size, loaded: true)

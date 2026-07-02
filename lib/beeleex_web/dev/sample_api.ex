@@ -91,11 +91,11 @@ defmodule BeeleexWeb.Dev.SampleApi do
   ]
 
   @impl true
-  def get_companies(_opts),
+  def get_companies(_token, _opts),
     do: {:ok, %{companies: @companies, total: length(@companies), count: length(@companies)}}
 
   @impl true
-  def get_company(id) do
+  def get_company(_token, id) do
     id = to_int(id)
 
     case Enum.find(@companies, &(&1.id == id)) do
@@ -105,30 +105,31 @@ defmodule BeeleexWeb.Dev.SampleApi do
   end
 
   @impl true
-  def create_company(input), do: {:ok, struct(Company, Map.put(input_to_company(input), :id, 99))}
+  def create_company(_token, input),
+    do: {:ok, struct(Company, Map.put(input_to_company(input), :id, 99))}
 
   @impl true
-  def update_company(id, input),
+  def update_company(_token, id, input),
     do: {:ok, struct(Company, Map.put(input_to_company(input), :id, to_int(id)))}
 
   @impl true
-  def delete_company(_id), do: {:ok, "Company deleted"}
+  def delete_company(_token, _id), do: {:ok, "Company deleted"}
 
   @impl true
-  def get_unlinked_projects(_project_ids), do: {:ok, ["proj-unlinked-1", "proj-unlinked-2"]}
+  def get_unlinked_projects(_token, _project_ids), do: {:ok, ["proj-unlinked-1", "proj-unlinked-2"]}
 
   @impl true
-  def link_projects(id, _project_ids), do: get_company(id)
+  def link_projects(token, id, _project_ids), do: get_company(token, id)
 
   @impl true
-  def unlink_project(id, _project_id), do: get_company(id)
+  def unlink_project(token, id, _project_id), do: get_company(token, id)
 
   @impl true
-  def get_invoices(_opts),
+  def get_invoices(_token, _opts),
     do: {:ok, %{invoices: @invoices, total: length(@invoices), count: length(@invoices)}}
 
   @impl true
-  def get_invoice(id) do
+  def get_invoice(_token, id) do
     id = to_int(id)
 
     case Enum.find(@invoices, &(&1.id == id)) do
@@ -138,7 +139,7 @@ defmodule BeeleexWeb.Dev.SampleApi do
   end
 
   @impl true
-  def get_payment_methods(_opts),
+  def get_payment_methods(_token, _opts),
     do:
       {:ok,
        %{
@@ -147,18 +148,29 @@ defmodule BeeleexWeb.Dev.SampleApi do
          count: length(@payment_methods)
        }}
 
+  # Stripe's card Element only mounts with a *valid* publishable key, so the dev
+  # harness uses Stripe's public documentation test key — this lets the "Add a
+  # card" field actually render locally. The `client_secret` is still a stub, so
+  # clicking "Save card" won't complete a real SetupIntent (that needs a real
+  # Beelee/Stripe backend); it only exercises the modal + Elements mounting.
   @impl true
-  def request_setup_intent(_company_id),
-    do: {:ok, %{client_secret: "seti_demo_secret", publishable_key: "pk_test_demo", verified: true}}
+  def request_setup_intent(_token, _company_id),
+    do:
+      {:ok,
+       %{
+         client_secret: "seti_demo_secret",
+         publishable_key: "pk_test_TYooMQauvdEDq54NiTphI7jx",
+         verified: true
+       }}
 
   @impl true
-  def deactivate_payment_method(_id), do: {:ok, "deactivated"}
+  def deactivate_payment_method(_token, _id), do: {:ok, "deactivated"}
 
   @impl true
-  def reactivate_payment_method(_id), do: {:ok, "active"}
+  def reactivate_payment_method(_token, _id), do: {:ok, "active"}
 
   @impl true
-  def make_default_payment_method(_company_id, _payment_id), do: {:ok, "stripe_card"}
+  def make_default_payment_method(_token, _company_id, _payment_id), do: {:ok, "stripe_card"}
 
   defp input_to_company(input) do
     %{
