@@ -62,11 +62,6 @@ defmodule BeeleexWeb.InvoicesLive.ListComponent do
     end
   end
 
-  defp invoice_tone("paid"), do: :success
-  defp invoice_tone("pending"), do: :warning
-  defp invoice_tone(status) when status in ["failed", "unpaid"], do: :danger
-  defp invoice_tone(_), do: :neutral
-
   @impl true
   def render(assigns) do
     page_count = max(1, ceil(assigns.total / assigns.size))
@@ -79,7 +74,7 @@ defmodule BeeleexWeb.InvoicesLive.ListComponent do
       <.table id={"#{@id}-table"} rows={@invoices} empty_message={gettext("No invoices yet")}>
         <:col :let={invoice} label={gettext("Type")}><%= invoice.type %></:col>
         <:col :let={invoice} label={gettext("Status")}>
-          <.badge tone={invoice_tone(invoice.status)}><%= invoice.status %></.badge>
+          <.badge tone={invoice_status_tone(invoice.status)}><%= invoice.status %></.badge>
         </:col>
         <:col :let={invoice} label={gettext("Cycle")}><%= invoice.cycle %></:col>
         <:col :let={invoice} label={gettext("Amount")}>

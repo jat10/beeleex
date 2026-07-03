@@ -42,26 +42,40 @@ defmodule BeeleexWeb.InvoicesLive.Show do
     <div class="bx-page">
       <.link navigate={@company_path} class="bx-back"><%= gettext("← Back to company") %></.link>
 
-      <h1 class="bx-title">
-        <%= gettext("Invoice #%{id}", id: @invoice.id) %>
-      </h1>
+      <div class="bx-header">
+        <h1 class="bx-title">
+          <%= gettext("Invoice #%{id}", id: @invoice.id) %>
+        </h1>
+        <.badge tone={invoice_status_tone(@invoice.status)}><%= @invoice.status %></.badge>
+      </div>
 
-      <section class="bx-card">
+      <section class="bx-card bx-invoice-summary">
         <dl class="bx-dl">
           <dt><%= gettext("Type") %></dt>
           <dd><%= @invoice.type %></dd>
-          <dt><%= gettext("Status") %></dt>
-          <dd><%= @invoice.status %></dd>
-          <dt><%= gettext("Cycle") %></dt>
-          <dd><%= @invoice.cycle %></dd>
-          <dt><%= gettext("Period") %></dt>
-          <dd><%= @invoice.beginning %> → <%= @invoice.end %></dd>
-          <dt><%= gettext("Amount before tax") %></dt>
-          <dd><%= format_amount(@invoice.amount_before_tax, @invoice.decimal_places) %></dd>
-          <dt><%= gettext("Tax") %></dt>
-          <dd><%= format_amount(@invoice.tax_amount, @invoice.decimal_places) %></dd>
-          <dt><%= gettext("Amount with tax") %></dt>
-          <dd><%= format_amount(@invoice.amount_with_tax, @invoice.decimal_places) %></dd>
+          <%= if @invoice.cycle not in [nil, ""] do %>
+            <dt><%= gettext("Cycle") %></dt>
+            <dd><%= @invoice.cycle %></dd>
+          <% end %>
+          <%= if @invoice.beginning not in [nil, ""] or @invoice.end not in [nil, ""] do %>
+            <dt><%= gettext("Period") %></dt>
+            <dd><%= @invoice.beginning %> → <%= @invoice.end %></dd>
+          <% end %>
+        </dl>
+
+        <dl class="bx-invoice-totals">
+          <div class="bx-invoice-totals__row">
+            <dt><%= gettext("Amount before tax") %></dt>
+            <dd><%= format_amount(@invoice.amount_before_tax, @invoice.decimal_places) %></dd>
+          </div>
+          <div class="bx-invoice-totals__row">
+            <dt><%= gettext("Tax") %></dt>
+            <dd><%= format_amount(@invoice.tax_amount, @invoice.decimal_places) %></dd>
+          </div>
+          <div class="bx-invoice-totals__row bx-invoice-totals__row--total">
+            <dt><%= gettext("Amount with tax") %></dt>
+            <dd><%= format_amount(@invoice.amount_with_tax, @invoice.decimal_places) %></dd>
+          </div>
         </dl>
       </section>
 

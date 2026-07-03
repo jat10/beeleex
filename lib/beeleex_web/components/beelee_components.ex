@@ -250,6 +250,14 @@ defmodule BeeleexWeb.BeeleeComponents do
 
   def format_amount(amount, _decimal_places), do: to_string(amount)
 
+  @doc """
+  Maps an invoice/payment status to a `<.badge>` tone.
+  """
+  def invoice_status_tone("paid"), do: :success
+  def invoice_status_tone("pending"), do: :warning
+  def invoice_status_tone(status) when status in ["failed", "unpaid"], do: :danger
+  def invoice_status_tone(_status), do: :neutral
+
   @doc "Shows a modal by id."
   def show_modal(js \\ %JS{}, id) when is_binary(id) do
     JS.remove_attribute(js, "hidden", to: "##{id}")

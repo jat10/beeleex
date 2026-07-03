@@ -6379,7 +6379,11 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       }
       confirmButton.disabled = true;
       const result = await this.stripe.confirmCardSetup(this.clientSecret, {
-        payment_method: { card: this.card }
+        payment_method: {
+          card: this.card,
+          // Stripe metadata values must be strings.
+          metadata: { beelee: "true" }
+        }
       });
       confirmButton.disabled = false;
       console.log("[beeleex] confirmCardSetup result", {

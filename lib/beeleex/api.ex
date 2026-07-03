@@ -578,7 +578,7 @@ defmodule Beeleex.Api do
                deleteCompany(id:$id) { message }
              }
              """,
-             variables: %{id: id}
+             variables: %{id: to_int(id)}
            },
            ui_headers(token)
          ) do
@@ -715,7 +715,7 @@ defmodule Beeleex.Api do
                getInvoice(id:$id) { #{invoice_fields()} }
              }
              """,
-             variables: %{id: id}
+             variables: %{id: to_int(id)}
            },
            ui_headers(token)
          ) do
